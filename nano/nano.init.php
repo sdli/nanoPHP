@@ -1,5 +1,5 @@
 <?php
-
+date_default_timezone_set('Asia/Shanghai'); 
 include 'nano.config.php';
 
 
@@ -80,13 +80,14 @@ class httpRequest{
 	private $url;
 	private $data;
 
-	public function __construct(string $method,string $url,array $data=null,closure $func=null){
+	public function __construct($method,$url,array $data=null,closure $func=null){
 		$this->method = $method;
 		$this->url = $url;
 		$this->data = $data;
 		$this->url = $this->getMethodToUrl();
 		$result = $this->https_request();
-		if(!empty($func)){call_user_func_array($func, array($result));}	
+		if(!empty($func)){call_user_func_array($func, array($result));}
+		return true;
 	}
 
 	/**
@@ -97,10 +98,8 @@ class httpRequest{
 	private function https_request(){
 	    $ch = curl_init();
 	    curl_setopt($ch,CURLOPT_URL,$this->url);
-
 	    curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
 	    curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,false);
-
 	    if(!empty($this->data)){
 	        curl_setopt($ch,CURLOPT_POST,1);
 	        curl_setopt($ch,CURLOPT_POSTFIELDS,$this->data);
@@ -112,7 +111,6 @@ class httpRequest{
 
 	    return $output;
 	}
-
 
 	/**
 	 * { if it's get method, change the array data into url}
@@ -136,7 +134,7 @@ class httpRequest{
 				return $this->url.$urlReset;
 			}		
 		}else{
-			return $this->data;
+			return $this->url;
 		}
 	}
 }
@@ -151,17 +149,117 @@ function v($param){
 		echo 'v should have a param';
 		exit;
 	}else{
-		@$data = $_GET[$param]?$_GET[$param]:'';
-		if(!$data){
-			@$param = $_POST[$param]?$_POST[$param]:'';
+		@$data = !empty($_GET[$param])?$_GET[$param]:'';
+		if(empty($data)){
+			@$data = !empty($_POST[$param])?$_POST[$param]:'';
 		}
 
-		if(!get_magic_quotes_gpc()){
-			@$data = addslashes($data);
+		if(!get_magic_quotes_gpc() && !is_array($data)){
+			@$data = !empty($data)?addslashes($data):'';
 		}
 	}
 
 	return @$data;
 }
 
+/**
+ * { delete space charactors }
+ *
+ * @param      <string>     $param  The parameter
+ *
+ * @throws     Exception  (when param is not defined)
+ *
+ * @return     <string>     (return parameter without space charactors )
+ */
+function t($param){
+	if(!$param){
+		throw new Exception('t should hava a param!');
+	}else{
+		@$newParam = trim($param);
+		return @$newParam;
+	}
+}
 
+
+function includeTpl($group,$item){
+	if(file_exists(ROOT.V_PATH.$group.D.$item.'.tpl.html')){
+		require_once(ROOT.V_PATH.$group.D.$item.'.tpl.html');
+	}else{
+		throw new Exception('no tpl.html found in ['.$group.'] path!');
+	}
+}
+
+function includeActiveTpl($group,$item,$activeItem){
+	$active = $activeItem;
+	if(file_exists(ROOT.V_PATH.$group.D.$item.'.tpl.html')){
+		require_once(ROOT.V_PATH.$group.D.$item.'.tpl.html');
+	}else{
+		throw new Exception('no tpl.html found in ['.$group.'] path!');
+	}
+}
+
+class ConnectMySql{
+	private $connect_url;
+	private $connect_db;
+	private $connect_username;
+	private $connect_password;
+	private $db;
+
+	function __construct(){
+		$this->db = new mysqli(DB_URL,DB_USER_NAME,DB_PASSWORD,DB_NAME);
+		if (mysqli_connect_error()) {
+    		die('Connect Error ('. mysqli_connect_errno() . ')'. mysqli_connect_error());
+		}else{
+			return "mysql connect succ!";
+		}
+	}
+
+	function get_query($query){
+		if(empty($query)){
+			$arr = array('code'=>-1,"msg"=>'query fail!');
+			return json_encode($arr);
+		}else{
+			$result = mysqli_query($this->db,$query);
+			$data = [];
+			$i =0;
+			while( $Array = mysqli_fetch_array($result, MYSQLI_ASSOC)){
+               $data[$i++] = $Array;
+            }
+            $arr = array(
+            	'code' => 1,
+            	'msg' => $data
+        	);
+			return json_encode($arr);
+		}
+	}
+
+	function insert_query($query){
+		if(empty($query)){
+			throw new Exception('Please Enter query!');
+		}else{
+			$result = mysqli_query($this->db,$query);
+			if($result){
+				return $result;
+			}else{
+				return mysqli_error($this->db); 
+			}
+		}
+	}
+}
+
+/**
+ * @param  path [str] path for file
+ * @param  uploadName [str] post file name
+ * @return [json]
+ */
+function save_file($path,$uploadName){
+	if($_FILES[$uploadName]["tmp_name"]){
+		$fileOrigin = explode('.', $_FILES[$uploadName]["name"]);
+		$newFileRoot = FILE_UPLOAD_PATH.$path.D.$fileOrigin[0].rand(1000,9999).'.'.$fileOrigin[1];
+		move_uploaded_file($_FILES[$uploadName]["tmp_name"],$newFileRoot);
+		return $newFileRoot;
+	}else{
+		throw new Exception("fileNotExits", 1);
+		return false;
+	}
+}
