@@ -1,12 +1,8 @@
 <?php
 date_default_timezone_set('Asia/Shanghai'); 
-include 'nano.config.php';
+include 'nano.config.php';//配置信息
 
-
-/**
- * Class for render.
- * set render method to render pages.
- */
+define("HOST_URL",getUrl("ALL"));
 
 if(v('p')){
 	if(file_exists(ROOT.M_PATH.v('p').'.php')){
@@ -67,6 +63,13 @@ class newRender{
 	}
 }
 
+/**
+ * 快捷渲染
+ */
+function loadPage($path,$page,array $param=null){
+	$r = new newRender(array($path=>$page),$param);
+	$r -> render();
+}
 
 /**
  * { 获取http请求，并处理相应内容！}
@@ -79,15 +82,17 @@ class httpRequest{
 	private $method;
 	private $url;
 	private $data;
+	private $func;
+	private $header;
+	private $ifJSON;
 
-	public function __construct($method,$url,array $data=null,closure $func=null){
-		$this->method = $method;
+	public function __construct($method,$url,array $data=null,closure $func=null,$ifJson=null){
+		$this->method = strtolower($method);
 		$this->url = $url;
 		$this->data = $data;
 		$this->url = $this->getMethodToUrl();
-		$result = $this->https_request();
-		if(!empty($func)){call_user_func_array($func, array($result));}
-		return true;
+		$this->func = $func;
+		$this->ifJSON = !empty($ifJson)?$ifJson:false;
 	}
 
 	/**
@@ -95,27 +100,77 @@ class httpRequest{
 	 *
 	 * @return     <Multiply>  ( http responese )
 	 */
+	
+	public function exec_request(){
+		$result = $this->https_request();
+		if(!empty($this->func)){
+			$callBack = call_user_func_array($this->func, array($result));
+			return $callBack;
+		}
+	}
+
 	private function https_request(){
-	    $ch = curl_init();
-	    curl_setopt($ch,CURLOPT_URL,$this->url);
-	    curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
-	    curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,false);
-	    if(!empty($this->data)){
-	        curl_setopt($ch,CURLOPT_POST,1);
-	        curl_setopt($ch,CURLOPT_POSTFIELDS,$this->data);
-	    }
+		switch ($this->method) {
+			case 'get':
+				//初始化
+				$ch = curl_init();
+				//设置选项，包括URL
+				curl_setopt($ch, CURLOPT_URL, $this->url);
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+				curl_setopt($ch, CURLOPT_HEADER, 0);
+				curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
+			    curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,false);
+				if(!empty($this->header)){
+					curl_setopt($ch, CURLOPT_HTTPHEADER, $this->header);
+				}
 
-	    curl_setopt($ch,CURLOPT_RETURNTRANSFER,1);
-	    $output = curl_exec($ch);
-	    curl_close($ch);
-
-	    return $output;
+				//执行并获取HTML文档内容
+				$output = curl_exec($ch);
+				//释放curl句柄
+				curl_close($ch);
+				//打印获得的数据
+				
+				return $output;
+				break;
+			case 'post':
+				$ch = curl_init();
+			    curl_setopt($ch,CURLOPT_URL,$this->url);
+			    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+				curl_setopt($ch, CURLOPT_HEADER, 0);
+			    curl_setopt($ch,CURLOPT_SSL_VERIFYPEER,false);
+			    curl_setopt($ch,CURLOPT_SSL_VERIFYHOST,false);
+			    if(!empty($this->data)){
+			        curl_setopt($ch,CURLOPT_POST,1);
+			        if($this->ifJSON){
+			        	curl_setopt($ch,CURLOPT_POSTFIELDS,json_encode($this->data));
+			        }else{
+			        	curl_setopt($ch,CURLOPT_POSTFIELDS,$this->data);
+			        } 
+			    }else{
+			    	curl_setopt($ch,CURLOPT_POSTFIELDS,null);
+			    }
+			    if(!empty($this->header)){
+					curl_setopt($ch, CURLOPT_HTTPHEADER, $this->header);
+				}
+			    $output = curl_exec($ch);
+			    curl_close($ch);
+			    return $output;
+			    break;
+		}  
 	}
 
 	/**
 	 * { if it's get method, change the array data into url}
 	 * @return <$this-url> {new url}
 	 */
+	public function setHeader($headerArr){
+		if(is_array($headerArr)){
+			$this->header = $headerArr;
+		}else{
+			throw new Exception("$headerArr should be array!", 1);
+		}
+	}
+
 	private function getMethodToUrl(){
 		if($this->method == 'get' && !empty($this->data)){
 			if(strstr($this->url,"?")){
@@ -148,12 +203,17 @@ function v($param){
 	if(!$param){
 		echo 'v should have a param';
 		exit;
-	}else{
+	}elseif($param != 'POST_ALL'){
 		@$data = !empty($_GET[$param])?$_GET[$param]:'';
 		if(empty($data)){
 			@$data = !empty($_POST[$param])?$_POST[$param]:'';
 		}
 
+		if(!get_magic_quotes_gpc() && !is_array($data)){
+			@$data = !empty($data)?addslashes($data):'';
+		}
+	}elseif($param == 'POST_ALL'){
+		@$data = !empty($_POST)?$_POST:json_decode(file_get_contents("php://input"),true);
 		if(!get_magic_quotes_gpc() && !is_array($data)){
 			@$data = !empty($data)?addslashes($data):'';
 		}
@@ -262,4 +322,40 @@ function save_file($path,$uploadName){
 		throw new Exception("fileNotExits", 1);
 		return false;
 	}
+}
+
+function echo_json($code,$msg,$data = null){
+	$arr = array(
+		'code'=>$code,
+		'msg'=>$msg,
+		'data'=>!empty($data)?$data:[]
+	);
+	echo json_encode($arr);
+}
+
+function getUrl($type){
+	$host_string = $_SERVER["HTTP_HOST"];
+	$f = strpos($host_string,"localhost");
+	switch ($type) {
+		case 'ALL':
+			if($f === false){
+				return "http://".$host_string.$_SERVER["REQUEST_URI"];
+			}else{
+				return $host_string.$_SERVER["REQUEST_URI"];
+			}
+			break;
+		
+		default:
+			if($f === false){
+				return "http://".$host_string;
+			}else{
+				return $host_string;
+			}
+			break;
+	}
+}
+
+function errorPage(array $data=null){
+	$page = new newRender(array('error'=>'error'), $data);
+	$page->render();
 }
